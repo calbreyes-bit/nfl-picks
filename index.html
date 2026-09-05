@@ -78,11 +78,11 @@
   .badge{
     width:26px; height:26px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center;
     font-size:10.5px; font-weight:700; color:#fff; flex:none; overflow:hidden; background-size:cover; background-position:center;
-    vertical-align:middle;
+    vertical-align:middle; border:2px solid var(--border);
   }
   .badge img{width:100%; height:100%; object-fit:cover; display:block;}
-  .badge.sm{width:18px; height:18px; font-size:8.5px;}
-  .badge.lg{width:34px; height:34px; font-size:13px;}
+  .badge.sm{width:18px; height:18px; font-size:8.5px; border-width:1.5px;}
+  .badge.lg{width:34px; height:34px; font-size:13px; border-width:2.5px;}
 
   /* fixture card */
   .card{
@@ -280,10 +280,13 @@
     var cls = 'badge' + (size ? ' ' + size : '');
     var bg = hashColor(name||'?');
     if (logoUrl) {
+      // Transparent background while a logo image is actually showing -- team crests
+      // are full-color art, not something that wants a colored disc behind it. The
+      // hash color only kicks in via onerror, as the initials-fallback's background.
       // Grab parentElement into a local before overwriting its innerHTML -- doing that
       // reassignment first (as the soccer template's onerror does) detaches this <img>,
       // so a second "this.parentElement" read on the following statement is already null.
-      return '<span class="'+cls+'" style="background:'+bg+'"><img src="'+esc(logoUrl)+'" alt="" loading="lazy" ' +
+      return '<span class="'+cls+'"><img src="'+esc(logoUrl)+'" alt="" loading="lazy" ' +
              'onerror="var p=this.parentElement;p.innerHTML=\''+esc(initials(name))+'\';p.style.background=\''+bg+'\';"></span>';
     }
     return '<span class="'+cls+'" style="background:'+bg+'">'+esc(initials(name))+'</span>';
