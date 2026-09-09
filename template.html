@@ -184,6 +184,11 @@
   .edge-item .em-label{font-size:13.5px; font-weight:600;}
   .edge-item .em-pct{font-size:12.5px; font-weight:700; color:var(--accent); margin-left:6px;}
   .edge-item .mkt-price{margin-left:6px;}
+  .ats-week-label{font-size:12px; font-weight:700; color:var(--dim); text-transform:uppercase; letter-spacing:.4px; margin:2px 2px 10px 2px;}
+  .ats-metrics{display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex-shrink:0;}
+  .ats-metrics > div{display:flex; gap:6px; align-items:baseline; font-size:12px; white-space:nowrap;}
+  .ats-metric-label{color:var(--dim);}
+  .ats-metric-val{font-weight:700; color:var(--accent);}
 
   /* tracker */
   .tsum{display:flex; gap:8px; margin-bottom:14px;}
@@ -238,6 +243,7 @@
   <div class="meta" id="genMeta"></div>
   <nav class="tabs">
     <button data-tab="top" class="active">Top Edges</button>
+    <button data-tab="ats">ATS Picks</button>
     <button data-tab="games">Games</button>
     <button data-tab="tracker">Tracker</button>
   </nav>
@@ -246,6 +252,10 @@
 <main>
   <section class="tab active" id="tab-top">
     <div id="topList"></div>
+  </section>
+
+  <section class="tab" id="tab-ats">
+    <div id="atsList"></div>
   </section>
 
   <section class="tab" id="tab-games">
@@ -506,6 +516,83 @@
       '</div>';
     }).join('');
     document.getElementById('topList').innerHTML = html;
+  }
+
+  // ---------- ATS Picks tab (Carlos, 2026-09-10) ----------
+  // Weekly contest: pick the 5 teams most likely to beat the spread by the biggest
+  // margin. "This week" = the games sharing the earliest week label among all
+  // upcoming games -- week_number is never populated by the ingest pipeline (see
+  // nfl_ingest/ingest.py's transform_games), so week label + earliest game date is
+  // the only reliable way to find "the next slate," and it's robust across
+  // playoff/preseason labels too, not just "Week N" strings. Both the expected point
+  // margin (Carlos's literal ask -- how many points the model expects that side to
+  // beat the spread by) and the probability edge (same edge_home_cover/
+  // edge_away_cover math as Top Edges) are shown side by side, per his choice --
+  // they usually agree on direction but can disagree on ranking, and he wants to
+  // compare rather than have one hidden.
+  function currentWeekGames(){
+    var upcoming = GAMES.filter(function(g){ return g.date && g.week; });
+    if (!upcoming.length) return [];
+    var earliestDate = upcoming.reduce(function(min, g){ return (!min || g.date < min) ? g.date : min; }, null);
+    var earliestLabel = upcoming.filter(function(g){ return g.date === earliestDate; })[0].week;
+    return upcoming.filter(function(g){ return g.week === earliestLabel; });
+  }
+  function computeAtsPicks(){
+    var games = currentWeekGames();
+    var out = [];
+    games.forEach(function(g){
+      var exp = g.expected||{}, spread = g.spread||{};
+      if (!isNum(exp.margin) || !isNum(spread.line)) return;
+      // spread.line is home-perspective, negative = home favored (see
+      // nfl_modeling_view.sql). Home covers when actual_margin > -spread.line, i.e.
+      // the model's expected cover margin for home = expected_margin + spread.line;
+      // positive means the model likes home to cover, negative means away.
+      var homeCoverMargin = exp.margin + spread.line;
+      var pickHome = homeCoverMargin >= 0;
+      out.push({
+        gameId: g.id, homeTeam: g.home, awayTeam: g.away,
+        pickTeam: pickHome ? g.home : g.away, pickIsHome: pickHome,
+        line: pickHome ? spread.line : -spread.line,
+        marginPts: Math.abs(homeCoverMargin),
+        probEdge: isNum(spread.edgeHome) ? (pickHome ? spread.edgeHome : -spread.edgeHome) : null,
+        price: pickHome ? spread.priceHome : spread.priceAway,
+        date: g.date, time: g.time, week: g.week,
+      });
+    });
+    out.sort(function(a,b){ return b.marginPts - a.marginPts; });
+    return out.slice(0, 5);
+  }
+  function renderAts(){
+    var picks = computeAtsPicks();
+    var weekGames = currentWeekGames();
+    var weekLbl = weekGames.length ? weekGames[0].week : null;
+    var header = weekLbl ? '<div class="ats-week-label">'+esc(weekLbl)+' -- top 5 vs. the spread</div>' : '';
+    if (!picks.length) {
+      document.getElementById('atsList').innerHTML = header + '<div class="empty">No spread lines posted yet for the upcoming week.</div>';
+      return;
+    }
+    var html = picks.map(function(p, i){
+      var matchLine = teamLabel(p.awayTeam)+' @ '+teamLabel(p.homeTeam)+' &middot; '+esc(fmtDate(p.date))+(fmtTime(p.time)?' &middot; '+fmtTime(p.time):'');
+      var priceStr = fmtAmerican(p.price);
+      var pickName = (p.pickTeam||{}).name || teamLabel(p.pickTeam);
+      var recLabel = teamLabel(p.pickTeam)+' '+fmtSignedLine(p.line);
+      return '<div class="edge-item">'+
+        '<div class="rank">#'+(i+1)+' &middot; '+matchLine+'</div>'+
+        '<div class="em-body">'+
+          '<div style="display:flex;align-items:center;gap:8px;">'+
+            badge(teamLabel(p.pickTeam), (p.pickTeam||{}).logo, 'sm')+
+            '<div class="em-label">'+esc(pickName)+' '+esc(fmtSignedLine(p.line))+
+              (priceStr!=null?' <span class="mkt-price">'+esc(priceStr)+'</span>':'')+'</div>'+
+          '</div>'+
+          '<div class="ats-metrics">'+
+            '<div><span class="ats-metric-label">Margin</span><span class="ats-metric-val">'+(p.marginPts>=0?'+':'')+fmtNum(p.marginPts,1)+' pts</span></div>'+
+            '<div><span class="ats-metric-label">Edge</span><span class="ats-metric-val">'+fmtEdgePct(p.probEdge)+'</span></div>'+
+          '</div>'+
+        '</div>'+
+        trackActionsHtml(p.gameId, 'spread', p.pickIsHome?'home':'away', recLabel, p.probEdge)+
+      '</div>';
+    }).join('');
+    document.getElementById('atsList').innerHTML = header + html;
   }
 
   // ---------- market row rendering for the Games tab expanded view ----------
@@ -1162,6 +1249,7 @@
   document.getElementById('genMeta').textContent = gen ? ('Updated ' + gen.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})) : '';
   buildWeekOptions();
   renderTop();
+  renderAts();
   renderGames();
   renderTracker();
   syncFromServer();
