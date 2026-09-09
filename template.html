@@ -551,18 +551,33 @@
   function snapshotHtml(g){
     var ratings = g.ratings||{}, scoring = g.scoring||{}, expected = g.expected||{};
     var home = g.home||{}, away = g.away||{};
-    function col(team, elo, asOf, avgScored, avgAllowed, logo){
+    // venueLabel/venueScored/venueAllowed/venueGames are optional (Carlos, 2026-09-09):
+    // the home team's scoring specifically AT HOME, or the away team's specifically ON THE
+    // ROAD -- i.e. each team's number in the exact role it's about to play, distinct from
+    // the season-wide avgScored/avgAllowed above. Renders nothing when there's no venue
+    // data yet (a team with zero completed games at that venue) rather than showing a
+    // stray "– scored / – allowed" line -- same "don't show what you don't have" approach
+    // as the rest of this dashboard.
+    function col(team, elo, asOf, avgScored, avgAllowed, logo, venueLabel, venueScored, venueAllowed, venueGames){
+      var venueLine = '';
+      if (isNum(venueScored) || isNum(venueAllowed)) {
+        venueLine = '<div class="stat">'+esc(venueLabel)+' <span><b>'+fmtNum(venueScored,1)+'</b> scored / <b>'+fmtNum(venueAllowed,1)+'</b> allowed'+
+          (isNum(venueGames)?' <span class="h2h-n">(N='+venueGames+')</span>':'')+'</span></div>';
+      }
       return '<div class="snapshot-col">'+
         '<h4>'+badge(teamLabel(team), logo, 'sm')+' '+esc(team.name||teamLabel(team))+'</h4>'+
         '<div class="stat">Elo <b>'+(isNum(elo)?fmtNum(elo,0):'–')+'</b></div>'+
         '<div class="stat">As of <b>'+(asOf?esc(fmtDate(asOf.slice(0,10))):'–')+'</b></div>'+
         '<div class="stat">Avg scored <b>'+fmtNum(avgScored,1)+'</b></div>'+
         '<div class="stat">Avg allowed <b>'+fmtNum(avgAllowed,1)+'</b></div>'+
+        venueLine+
       '</div>';
     }
     var grid = '<div class="snapshot-grid">'+
-      col(home, ratings.homeElo, ratings.homeAsOf, scoring.homeAvgScored, scoring.homeAvgAllowed, home.logo)+
-      col(away, ratings.awayElo, ratings.awayAsOf, scoring.awayAvgScored, scoring.awayAvgAllowed, away.logo)+
+      col(home, ratings.homeElo, ratings.homeAsOf, scoring.homeAvgScored, scoring.homeAvgAllowed, home.logo,
+          'At home', scoring.homeAvgScoredAtHome, scoring.homeAvgAllowedAtHome, scoring.homeVenueGamesPlayed)+
+      col(away, ratings.awayElo, ratings.awayAsOf, scoring.awayAvgScored, scoring.awayAvgAllowed, away.logo,
+          'On road', scoring.awayAvgScoredOnRoad, scoring.awayAvgAllowedOnRoad, scoring.awayVenueGamesPlayed)+
     '</div>';
     var hasExpected = isNum(expected.margin) || isNum(expected.total) || isNum(expected.teamHome) || isNum(expected.teamAway);
     var expectedHtml = '';
