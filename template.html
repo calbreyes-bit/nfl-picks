@@ -132,6 +132,17 @@
   .injury-status.out{color:var(--red);}
   .injury-status.doubtful, .injury-status.questionable{color:var(--amber);}
   .injury-empty{color:var(--dim); font-size:12px;}
+  .form-row{display:flex; justify-content:space-between; gap:8px; padding:1px 0; font-size:12px; color:var(--dim);}
+  .form-row b{color:var(--text); font-weight:600;}
+  .form-streak{font-weight:700; margin-left:3px;}
+  .form-streak.w{color:var(--green);}
+  .form-streak.l{color:var(--red);}
+  .form-chips{display:flex; gap:4px; margin:4px 0 2px 0;}
+  .form-chip{display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border-radius:4px; font-size:10px; font-weight:700;}
+  .form-chip.w{background:var(--green-bg); color:var(--green);}
+  .form-chip.l{background:var(--red-bg); color:var(--red);}
+  .form-chip.t{background:var(--chip-bg); color:var(--dim);}
+  .form-empty{color:var(--dim); font-size:12px;}
 
   .market-row{
     display:flex; justify-content:space-between; align-items:flex-start; gap:8px; padding:8px 0; border-bottom:1px solid var(--border);
@@ -677,6 +688,43 @@
     '</div>';
   }
 
+  // ---------- recent form box (Carlos, 2026-09-10) ----------
+  // g.form is always present (build_game_json always emits the key) but
+  // form.home/form.away are null field-by-field, not fabricated zeros, for a
+  // team with zero completed games (a brand-new franchise, or before Week 1)
+  // -- same "never fabricate" convention as injuries above. recentGames comes
+  // most-recent-first from the backend; reversed here so the chip row reads
+  // oldest-to-newest left-to-right, ending at "now" on the right.
+  function formStreakLabel(result, length){
+    if (!result || !isNum(length) || length <= 0) return '';
+    return result + length;
+  }
+  function formRecordHtml(f){
+    if (!f || !isNum(f.gamesPlayed) || f.gamesPlayed <= 0) return '<div class="form-empty">No data</div>';
+    var record = f.wins + '-' + f.losses + (f.ties ? '-' + f.ties : '');
+    var streak = formStreakLabel(f.streakResult, f.streakLength);
+    var streakCls = f.streakResult === 'W' ? 'w' : (f.streakResult === 'L' ? 'l' : '');
+    var chips = (f.recentGames||[]).slice().reverse().map(function(rg){
+      var cls = rg.result === 'W' ? 'w' : (rg.result === 'L' ? 'l' : 't');
+      return '<span class="form-chip '+cls+'" title="'+esc(fmtDate(rg.date))+': '+rg.pointsScored+'-'+rg.pointsAllowed+'">'+esc(rg.result)+'</span>';
+    }).join('');
+    return '<div class="form-row"><span>Last '+f.gamesPlayed+': <b>'+esc(record)+'</b>'+
+        (streak?' <span class="form-streak '+streakCls+'">'+esc(streak)+'</span>':'')+'</span>'+
+      '<span>'+fmtNum(f.avgScored,1)+' / '+fmtNum(f.avgAllowed,1)+' avg</span></div>'+
+      '<div class="form-chips">'+chips+'</div>';
+  }
+  function formHtml(g){
+    var form = g.form||{};
+    var home = g.home||{}, away = g.away||{};
+    return '<div class="h2h-box">'+
+      '<h4><span>Recent Form</span><span class="h2h-meta">Last 5</span></h4>'+
+      '<div class="injury-col-label">'+esc(teamLabel(away))+'</div>'+
+      formRecordHtml(form.away)+
+      '<div class="injury-col-label">'+esc(teamLabel(home))+'</div>'+
+      formRecordHtml(form.home)+
+    '</div>';
+  }
+
   function topEdgeTeaser(g){
     var entries = computeEdgeEntries(g);
     if (!entries.length) return '<div class="bb-line pass">No edges available</div>';
@@ -701,6 +749,7 @@
         snapshotHtml(g)+
         h2hHtml(g)+
         injuriesHtml(g)+
+        formHtml(g)+
         marketsHtml(g)+
       '</div>'+
     '</div>';
