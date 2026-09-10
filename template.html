@@ -244,6 +244,7 @@
   <nav class="tabs">
     <button data-tab="top" class="active">Top Edges</button>
     <button data-tab="ats">ATS Picks</button>
+    <button data-tab="teaser">7pt Teasers</button>
     <button data-tab="games">Games</button>
     <button data-tab="tracker">Tracker</button>
   </nav>
@@ -258,9 +259,15 @@
     <div id="atsList"></div>
   </section>
 
+  <section class="tab" id="tab-teaser">
+    <div id="teaserList"></div>
+  </section>
+
   <section class="tab" id="tab-games">
     <div class="filters">
       <select id="f-week"><option value="">All weeks</option></select>
+      <select id="f-day"><option value="">All days</option></select>
+      <button class="dropdown-btn" id="f-time-btn">Kickoff <span class="count" id="f-time-count"></span></button>
       <input type="search" id="f-team" placeholder="Search team name…">
     </div>
     <div id="gameList"></div>
@@ -276,6 +283,16 @@
     <div id="trackerList"></div>
   </section>
 </main>
+
+<div class="scrim" id="scrim"></div>
+<div class="dropdown-panel" id="f-time-panel">
+  <div class="actions">
+    <button id="time-all">Select all</button>
+    <button id="time-clear">Clear</button>
+  </div>
+  <div id="time-options"></div>
+  <button class="backdrop-close" data-close>Done</button>
+</div>
 
 <script>
 (function(){
@@ -595,6 +612,69 @@
     document.getElementById('atsList').innerHTML = header + html;
   }
 
+  // ---------- 7-point teaser picks (Carlos, 2026-09-10) ----------
+  // For each game this week, the more probable side of the spread and the more probable
+  // side of the total AFTER a 7-point tease in that side's favor (nfl_modeling_view.sql's
+  // teaser7_* columns -- see that file's header comment for the exact math: both sides get
+  // their own +7 adjustment, so home/away or over/under are NOT complementary here, unlike
+  // model_prob_home_cover/away_cover). g.teaser7 is always present in the payload
+  // (build_game_json always emits the key) but every sub-field is null until a spread/total
+  // line has actually posted for that game -- same "no data" convention as every other
+  // market block on this dashboard. Same "current week only" scope as the ATS tab, not
+  // capped to a top-N -- Carlos combines legs himself across games into his own teaser,
+  // so the point is to see the whole week's candidates, not just the best few.
+  function currentWeekTeaserPicks(){
+    var games = currentWeekGames();
+    var out = [];
+    games.forEach(function(g){
+      var t7 = g.teaser7 || {};
+      if (!isNum(t7.spreadProb) && !isNum(t7.totalProb)) return;
+      var home = g.home || {}, away = g.away || {};
+      var spreadTeam = null;
+      if (t7.spreadTeamId != null) {
+        spreadTeam = (t7.spreadTeamId === home.id) ? home : (t7.spreadTeamId === away.id ? away : null);
+      }
+      out.push({
+        gameId: g.id, homeTeam: home, awayTeam: away, date: g.date, time: g.time, week: g.week,
+        spreadTeam: spreadTeam, spreadLine: t7.spreadLine, spreadProb: t7.spreadProb,
+        totalSide: t7.totalSide, totalLine: t7.totalLine, totalProb: t7.totalProb,
+        combinedProb: (isNum(t7.spreadProb) && isNum(t7.totalProb)) ? t7.spreadProb * t7.totalProb : null,
+      });
+    });
+    out.sort(function(a, b){
+      var av = isNum(a.combinedProb) ? a.combinedProb : Math.max(a.spreadProb || 0, a.totalProb || 0);
+      var bv = isNum(b.combinedProb) ? b.combinedProb : Math.max(b.spreadProb || 0, b.totalProb || 0);
+      return bv - av;
+    });
+    return out;
+  }
+  function renderTeaser(){
+    var picks = currentWeekTeaserPicks();
+    var weekGames = currentWeekGames();
+    var weekLbl = weekGames.length ? weekGames[0].week : null;
+    var header = weekLbl ? '<div class="ats-week-label">'+esc(weekLbl)+' -- most probable 7-point teaser legs</div>' : '';
+    if (!picks.length) {
+      document.getElementById('teaserList').innerHTML = header + '<div class="empty">No spread/total lines posted yet for the upcoming week.</div>';
+      return;
+    }
+    var html = picks.map(function(p, i){
+      var matchLine = teamLabel(p.awayTeam)+' @ '+teamLabel(p.homeTeam)+' &middot; '+esc(fmtDate(p.date))+(fmtTime(p.time)?' &middot; '+fmtTime(p.time):'');
+      var spreadStr = (isNum(p.spreadLine) && p.spreadTeam) ? (teamLabel(p.spreadTeam)+' '+fmtSignedLine(p.spreadLine)) : '–';
+      var totalStr = (isNum(p.totalLine) && p.totalSide) ? ((p.totalSide==='over'?'Over ':'Under ')+fmtLine(p.totalLine)) : '–';
+      return '<div class="edge-item">'+
+        '<div class="rank">#'+(i+1)+' &middot; '+matchLine+'</div>'+
+        '<div class="em-body">'+
+          '<div class="ats-metrics">'+
+            '<div><span class="ats-metric-label">Spread leg</span><span class="ats-metric-val">'+esc(spreadStr)+(isNum(p.spreadProb)?' ('+fmtPct(p.spreadProb)+')':'')+'</span></div>'+
+            '<div><span class="ats-metric-label">Total leg</span><span class="ats-metric-val">'+esc(totalStr)+(isNum(p.totalProb)?' ('+fmtPct(p.totalProb)+')':'')+'</span></div>'+
+            (isNum(p.combinedProb)?'<div><span class="ats-metric-label">Both legs</span><span class="ats-metric-val">'+fmtPct(p.combinedProb)+'</span></div>':'')+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+    document.getElementById('teaserList').innerHTML = header + html;
+  }
+
   // ---------- market row rendering for the Games tab expanded view ----------
   function marketRowHtml(label, teamName, modelProb, marketProb, edge, lineHtml, gameId, marketKey, side, recLabel, price){
     var labelHtml = '<div class="label">'+esc(label)+(teamName?'<br><span style="opacity:.6">'+esc(teamName)+'</span>':'')+'</div>';
@@ -843,6 +923,64 @@
   }
 
   // ---------- Games tab / filters ----------
+  // Date + Kickoff filters (added 2026-09-10, Carlos: "add the Date and Kickoff
+  // time filters the same as in the Match Day Dashboard") -- mirrors Match Day
+  // Board's Fixtures-tab f-day/f-time pattern exactly (same dropdown-panel CSS,
+  // already present in this file but unused until now), adapted to this
+  // dashboard's g.date/g.time fields instead of fx.date/fx.ts.
+  var timeSet = [];
+  var timeSelected = new Set();
+
+  function buildDayOptions(){
+    var days = Array.from(new Set(GAMES.map(function(g){ return g.date; }))).filter(Boolean).sort();
+    var sel = document.getElementById('f-day');
+    days.forEach(function(d){
+      var o = document.createElement('option'); o.value = d; o.textContent = fmtDate(d); sel.appendChild(o);
+    });
+  }
+
+  function buildTimeOptions(){
+    timeSet = Array.from(new Set(GAMES.map(function(g){ return fmtTime(g.time); }))).filter(Boolean).sort(function(a,b){
+      // sort chronologically by parsing back to minutes-ish (same trick as Match Day Board's f-time)
+      function toMinutes(t){
+        var m = t.match(/(\d+):(\d+)\s*([AP]M)/i);
+        if(!m) return 0;
+        var h = parseInt(m[1],10)%12; if(/pm/i.test(m[3])) h+=12;
+        return h*60+parseInt(m[2],10);
+      }
+      return toMinutes(a)-toMinutes(b);
+    });
+    timeSelected = new Set(timeSet);
+    renderTimeOptions();
+    updateTimeCount();
+  }
+  function renderTimeOptions(){
+    var box = document.getElementById('time-options');
+    box.innerHTML = timeSet.map(function(t){
+      var checked = timeSelected.has(t) ? 'checked' : '';
+      return '<label><input type="checkbox" value="'+esc(t)+'" '+checked+' class="time-cb"> '+esc(t)+'</label>';
+    }).join('');
+    box.querySelectorAll('.time-cb').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        if (cb.checked) timeSelected.add(cb.value); else timeSelected.delete(cb.value);
+        updateTimeCount(); renderGames();
+      });
+    });
+  }
+  function updateTimeCount(){
+    var tc = document.getElementById('f-time-count');
+    tc.textContent = (timeSelected.size && timeSelected.size < timeSet.length) ? '('+timeSelected.size+')' : '';
+  }
+  function openPanel(panel){
+    document.getElementById('scrim').classList.add('open');
+    panel.classList.add('open');
+    panel.style.top = '90px';
+  }
+  function closeAllPanels(){
+    document.querySelectorAll('.dropdown-panel').forEach(function(p){ p.classList.remove('open'); });
+    document.getElementById('scrim').classList.remove('open');
+  }
+
   function weekSortKey(g){
     return {week: g.week, weekNumber: g.weekNumber, date: g.date};
   }
@@ -871,6 +1009,9 @@
   function passesGameFilters(g){
     var week = document.getElementById('f-week').value;
     if (week && g.week !== week) return false;
+    var day = document.getElementById('f-day').value;
+    if (day && g.date !== day) return false;
+    if (timeSet.length && timeSelected.size < timeSet.length && !timeSelected.has(fmtTime(g.time))) return false;
     var teamQ = document.getElementById('f-team').value.trim().toLowerCase();
     if (teamQ) {
       var home = g.home||{}, away = g.away||{};
@@ -911,6 +1052,12 @@
   });
 
   document.getElementById('f-week').addEventListener('change', renderGames);
+  document.getElementById('f-day').addEventListener('change', renderGames);
+  document.getElementById('f-time-btn').addEventListener('click', function(){ openPanel(document.getElementById('f-time-panel')); });
+  document.getElementById('scrim').addEventListener('click', closeAllPanels);
+  document.querySelectorAll('[data-close]').forEach(function(b){ b.addEventListener('click', closeAllPanels); });
+  document.getElementById('time-all').addEventListener('click', function(){ timeSelected = new Set(timeSet); renderTimeOptions(); updateTimeCount(); renderGames(); });
+  document.getElementById('time-clear').addEventListener('click', function(){ timeSelected = new Set(); renderTimeOptions(); updateTimeCount(); renderGames(); });
   document.getElementById('f-team').addEventListener('input', renderGames);
 
   // ---------- tabs ----------
@@ -1248,8 +1395,11 @@
   var gen = DATA.generatedAt ? new Date(DATA.generatedAt) : null;
   document.getElementById('genMeta').textContent = gen ? ('Updated ' + gen.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})) : '';
   buildWeekOptions();
+  buildDayOptions();
+  buildTimeOptions();
   renderTop();
   renderAts();
+  renderTeaser();
   renderGames();
   renderTracker();
   syncFromServer();
